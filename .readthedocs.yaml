@@ -1,0 +1,34 @@
+---
+# .readthedocs.yaml
+# Read the Docs configuration file
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
+
+version: 2
+
+build:
+  os: ubuntu-lts-latest
+  tools:
+    rust: latest
+  apt_packages:
+    - libayatana-appindicator3-dev
+    - libglib2.0-dev
+    - libgtk-3-dev
+    - libxdo-dev
+  jobs:
+    build:
+      html:
+        - cargo doc --no-deps --verbose --color always
+        - mkdir -p ${READTHEDOCS_OUTPUT}html
+        - cp -r target/doc/. ${READTHEDOCS_OUTPUT}html/
+        # redirect index.html to html/koko/index.html
+        - |
+          cat <<EOF > ${READTHEDOCS_OUTPUT}html/index.html
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta http-equiv="refresh" content="0; url=koko/index.html">
+            </head>
+            <body></body>
+          </html>
+          EOF
+        - ls -alR ${READTHEDOCS_OUTPUT}html
