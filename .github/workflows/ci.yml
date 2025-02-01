@@ -40,10 +40,38 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
   build:
-    # TODO: setup strategy matrix and/or cross compile
-    name: Build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu  # Debian
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl  # Alpine
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu  # Debian
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl  # Alpine
+            os: ubuntu-latest
+          - target: armv7-unknown-linux-gnueabihf  # Raspberry Pi 2-5/Debian
+            os: ubuntu-latest
+          - target: armv7-unknown-linux-musleabihf  # Raspberry Pi 2-5/Alpine
+            os: ubuntu-latest
+          - target: arm-unknown-linux-gnueabihf  # Raspberry Pi 0-1/Debian
+            os: ubuntu-latest
+          - target: arm-unknown-linux-musleabihf  # Raspberry Pi 0-1/Alpine
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin  # macOS
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc  # Windows
+            os: windows-latest
+    name: Build (${{ matrix.target }})
     needs: setup_release
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,24 +80,131 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/work/_temp/_github_home/.cargo/registry
-            ~/work/_temp/_github_home/.cargo/git
-            target
-          key: ${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('**/Cargo.lock') }}
+            ~/.cargo/registry
+            ~/.cargo/git
+            ./target
+          key: ${{ matrix.target }}-${{ github.sha }}
           restore-keys: |
-            ${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('**/Cargo.lock') }}
-            ${{ github.job }}-${{ hashFiles('rust-toolchain.toml') }}-
+            ${{ matrix.target }}-${{ github.sha }}
+            ${{ matrix.target }}-
+
+      - name: Setup cross compiling
+        id: cross_compile
+        if: contains(matrix.os, 'ubuntu')
+        run: |
+          echo "::group::distro detection"
+          # detect dist name like bionic, focal, etc
+          dist_name=$(lsb_release -cs)
+          ubuntu_version=$(lsb_release -rs)
+          ubuntu_major_version=${ubuntu_version%%.*}
+          echo "detected dist name: $dist_name"
+          echo "detected ubuntu version: $ubuntu_version"
+          echo "detected ubuntu major version: $ubuntu_major_version"
+          echo "::endgroup::"
+
+          echo "::group::install aptitude"
+          sudo apt-get update  # must run before changing sources file
+          sudo apt-get install -y \
+            aptitude
+          echo "::endgroup::"
+
+          echo "::group::dependencies prep"
+          # common dependencies
+          dependencies=()
+
+          # extra dependencies for cross-compiling
+          cross_compile=false
+          package_arch=$(dpkg --print-architecture)
+          pkg_config_sysroot_dir="/usr/lib/${package_arch}"
+          if [[ ${{ matrix.target }} == *"aarch64"* ]]; then
+            dependencies+=("crossbuild-essential-arm64")
+            cross_compile=true
+            package_arch="arm64"
+            pkg_config_sysroot_dir="/usr/lib/aarch64-linux-gnu"
+          elif [[ ${{ matrix.target }} == *"arm"* ]]; then
+            dependencies+=("crossbuild-essential-armhf")
+            cross_compile=true
+            package_arch="armhf"
+            pkg_config_sysroot_dir="/usr/lib/arm-linux-gnueabihf"
+          fi
+          echo "cross compiling: $cross_compile"
+          echo "package architecture: $package_arch"
+
+          dependencies+=(
+            "libayatana-appindicator3-dev:${package_arch}"  # tray icon
+            "libglib2.0-dev:${package_arch}"
+            "libgtk-3-dev:${package_arch}"
+            "libxdo-dev:${package_arch}"
+          )
+          echo "::endgroup::"
+
+          echo "::group::apt sources"
+          extra_sources=$(cat <<- VAREOF
+          Types: deb
+          URIs: mirror+file:/etc/apt/apt-mirrors.txt
+          Suites: ${dist_name} ${dist_name}-updates ${dist_name}-backports ${dist_name}-security
+          Components: main universe restricted multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          Architectures: $(dpkg --print-architecture)
+
+          Types: deb
+          URIs: https://ports.ubuntu.com/ubuntu-ports
+          Suites: ${dist_name} ${dist_name}-updates ${dist_name}-backports ${dist_name}-security
+          Components: main universe restricted multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          Architectures: ${package_arch}
+          VAREOF
+          )
+
+          # source file changed in 24.04
+          if [[ $ubuntu_major_version -ge 24 ]]; then
+            source_file="/etc/apt/sources.list.d/ubuntu.sources"
+          else
+            source_file="/etc/apt/sources.list"
+          fi
+
+          if [[ ${cross_compile} == true ]]; then
+            # print original sources
+            echo "original sources:"
+            sudo cat ${source_file}
+            echo "----"
+
+            sudo dpkg --add-architecture ${package_arch}
+
+            echo "$extra_sources" | sudo tee ${source_file} > /dev/null
+            echo "----"
+            echo "new sources:"
+            sudo cat ${source_file}
+            echo "----"
+          fi
+          echo "::endgroup::"
+
+          echo "::group::output"
+          echo "CROSS_COMPILE=${cross_compile}"
+          echo "CROSS_COMPILE=${cross_compile}" >> $GITHUB_OUTPUT
+
+          echo "DEPENDENCIES=${dependencies[@]}"
+          echo "DEPENDENCIES=${dependencies[@]}" >> $GITHUB_OUTPUT
+
+          echo "PKG_CONFIG_SYSROOT_DIR=${pkg_config_sysroot_dir}"
+          echo "PKG_CONFIG_SYSROOT_DIR=${pkg_config_sysroot_dir}" >> $GITHUB_ENV
+
+          echo "PKG_CONFIG_PATH=${pkg_config_sysroot_dir}/pkgconfig"
+          echo "PKG_CONFIG_PATH=${pkg_config_sysroot_dir}/pkgconfig" >> $GITHUB_ENV
+          echo "::endgroup::"
 
       - name: Install system dependencies
+        if: contains(matrix.os, 'ubuntu')
         run: |
+          echo "::group::apt update"
           sudo apt-get update
-          sudo apt-get install -y \
-            libayatana-appindicator3-dev \
-            libglib2.0-dev \
-            libgtk-3-dev \
-            libxdo-dev
+          echo "::endgroup::"
 
-      - name: Install dependencies
+          echo "::group::install dependencies"
+          sudo aptitude install -y --without-recommends ${{ steps.cross_compile.outputs.DEPENDENCIES }}
+          echo "::endgroup::"
+
+      - name: Install cargo dependencies
         run: |
           # cargo-bin --install doesn't work without a lock file
           # https://github.com/dustinblackman/cargo-run-bin/issues/27
@@ -83,12 +218,19 @@ jobs:
         if: ${{ needs.setup_release.outputs.publish_release == 'true' }}
         run: cargo set-version ${{ needs.setup_release.outputs.release_version }}
 
+      - name: Install toolchain
+        run: rustup target add ${{ matrix.target }}
+
       - name: Test
         id: test
         run: |
           cargo tarpaulin \
+            --color always \
             --engine llvm \
-            --out Xml
+            --no-fail-fast \
+            --out Xml \
+            --target ${{ matrix.target }} \
+            --verbose
 
       - name: Upload coverage
         # any except canceled or skipped
@@ -101,20 +243,20 @@ jobs:
           disable_search: true
           fail_ci_if_error: true
           files: cobertura.xml
+          flags: ${{ matrix.target }}
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
       - name: Clippy
         run: cargo clippy -- -D warnings
 
-      - name: Install toolchain
-        run: rustup target add x86_64-unknown-linux-gnu
-
       - name: Build
-        run: cargo build --target x86_64-unknown-linux-gnu --release
+        run: cargo build --target ${{ matrix.target }} --release
 
       - name: Strip all debug symbols
-        run: strip --strip-all target/x86_64-unknown-linux-gnu/release/koko
+        # TODO: is this necessary
+        if: contains(matrix.os, 'ubuntu')
+        run: strip --strip-all target/${{ matrix.target }}/release/koko
 
       - name: Enable reading of cache
         # TODO: is this necessary
@@ -124,8 +266,8 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: koko-x86_64-unknown-linux-gnu
-          path: target/x86_64-unknown-linux-gnu/release/koko
+          name: koko-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/koko
 
       - name: Create/Update GitHub Release
         if: false
@@ -133,7 +275,7 @@ jobs:
         uses: LizardByte/create-release-action@v2025.102.13208
         with:
           allowUpdates: true
-          artifacts: 'target/x86_64-unknown-linux-gnu/release/koko'
+          artifacts: 'target/${{ matrix.target }}/release/koko'
           body: ${{ needs.setup_release.outputs.release_body }}
           generateReleaseNotes: ${{ needs.setup_release.outputs.release_generate_release_notes }}
           name: ${{ needs.setup_release.outputs.release_tag }}
