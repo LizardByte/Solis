@@ -46,30 +46,50 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu  # Debian
             os: ubuntu-latest
+            shell: bash
           - target: x86_64-unknown-linux-musl  # Alpine
             os: ubuntu-latest
+            container: alpine:latest
+            shell: sh
+            cargo_env: "source $HOME/.cargo/env"
           - target: aarch64-unknown-linux-gnu  # Debian
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
+            shell: bash
           - target: aarch64-unknown-linux-musl  # Alpine
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
+            container: alpine:latest
+            shell: sh
+            cargo_env: "source $HOME/.cargo/env"
           - target: armv7-unknown-linux-gnueabihf  # Raspberry Pi 2-5/Debian
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
+            shell: bash
           - target: armv7-unknown-linux-musleabihf  # Raspberry Pi 2-5/Alpine
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
+            container: alpine:latest
+            shell: sh
+            cargo_env: "source $HOME/.cargo/env"
           - target: arm-unknown-linux-gnueabihf  # Raspberry Pi 0-1/Debian
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
+            shell: bash
           - target: arm-unknown-linux-musleabihf  # Raspberry Pi 0-1/Alpine
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
+            container: alpine:latest
+            shell: sh
+            cargo_env: "source $HOME/.cargo/env"
           - target: x86_64-apple-darwin  # macOS
             os: macos-latest
+            shell: bash
           - target: x86_64-pc-windows-msvc  # Windows
             os: windows-latest
+            shell: bash
     name: Build (${{ matrix.target }})
     needs: setup_release
     runs-on: ${{ matrix.os }}
+    container:
+      image: ${{ matrix.container }}
     defaults:
       run:
-        shell: bash
+        shell: ${{ matrix.shell }}
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -88,9 +108,9 @@ jobs:
             ${{ matrix.target }}-${{ github.sha }}
             ${{ matrix.target }}-
 
-      - name: Setup cross compiling
+      - name: Setup cross compiling (Debian)
         id: cross_compile
-        if: contains(matrix.os, 'ubuntu')
+        if: contains(matrix.os, 'ubuntu') && matrix.container == null
         run: |
           echo "::group::distro detection"
           # detect dist name like bionic, focal, etc
@@ -109,19 +129,18 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::dependencies prep"
-          # common dependencies
           dependencies=()
 
           # extra dependencies for cross-compiling
           cross_compile=false
           package_arch=$(dpkg --print-architecture)
           pkg_config_sysroot_dir="/usr/lib/${package_arch}"
-          if [[ ${{ matrix.target }} == *"aarch64"* ]]; then
+          if [[ ${{ matrix.target }} == *"aarch64"* && $package_arch != "arm64" ]]; then
             dependencies+=("crossbuild-essential-arm64")
             cross_compile=true
             package_arch="arm64"
             pkg_config_sysroot_dir="/usr/lib/aarch64-linux-gnu"
-          elif [[ ${{ matrix.target }} == *"arm"* ]]; then
+          elif [[ ${{ matrix.target }} == *"arm"* && $package_arch != "armhf" ]]; then
             dependencies+=("crossbuild-essential-armhf")
             cross_compile=true
             package_arch="armhf"
@@ -193,8 +212,8 @@ jobs:
           echo "PKG_CONFIG_PATH=${pkg_config_sysroot_dir}/pkgconfig" >> $GITHUB_ENV
           echo "::endgroup::"
 
-      - name: Install system dependencies
-        if: contains(matrix.os, 'ubuntu')
+      - name: Install system dependencies (Debian)
+        if: contains(matrix.os, 'ubuntu') && matrix.container == null
         run: |
           echo "::group::apt update"
           sudo apt-get update
@@ -202,6 +221,32 @@ jobs:
 
           echo "::group::install dependencies"
           sudo aptitude install -y --without-recommends ${{ steps.cross_compile.outputs.DEPENDENCIES }}
+          echo "::endgroup::"
+
+      - name: Install system dependencies (Alpine)
+        if: contains(matrix.os, 'ubuntu') && contains(matrix.container, 'alpine')
+        run: |
+          echo "::group::apk update"
+          apk update
+          echo "::endgroup::"
+
+          echo "::group::install dependencies"
+          apk add --no-cache \
+            build-base \
+            cargo \
+            gcc \
+            g++ \
+            glib-dev \
+            gtk+3.0-dev \
+            libayatana-appindicator-dev \
+            musl-dev \
+            openssl-dev \
+            rustup \
+            xdotool-dev
+          echo "::endgroup::"
+
+          echo "::group::rustup"
+          rustup-init -y
           echo "::endgroup::"
 
       - name: Install cargo dependencies
@@ -219,11 +264,14 @@ jobs:
         run: cargo set-version ${{ needs.setup_release.outputs.release_version }}
 
       - name: Install toolchain
-        run: rustup target add ${{ matrix.target }}
+        run: |
+          ${{ matrix.cargo_env }}
+          rustup target add ${{ matrix.target }}
 
       - name: Test
         id: test
         run: |
+          ${{ matrix.cargo_env }}
           cargo tarpaulin \
             --color always \
             --engine llvm \
@@ -248,10 +296,14 @@ jobs:
           verbose: true
 
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: |
+          ${{ matrix.cargo_env }}
+          cargo clippy -- -D warnings
 
       - name: Build
-        run: cargo build --target ${{ matrix.target }} --release
+        run: |
+          ${{ matrix.cargo_env }}
+          cargo build --target ${{ matrix.target }} --release
 
       - name: Strip all debug symbols
         # TODO: is this necessary
