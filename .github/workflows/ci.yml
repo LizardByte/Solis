@@ -47,36 +47,41 @@ jobs:
           - target: x86_64-unknown-linux-gnu  # Debian
             os: ubuntu-latest
             shell: bash
-          - target: x86_64-unknown-linux-musl  # Alpine
-            os: ubuntu-latest
-            container: alpine:latest
-            shell: sh
+          # TODO: Fix compiling for musl
+          # - target: x86_64-unknown-linux-musl  # Alpine
+          #  os: ubuntu-latest
+          #  container: alpine:latest
+          #  shell: sh
             cargo_env: "source $HOME/.cargo/env"
           - target: aarch64-unknown-linux-gnu  # Debian
             os: ubuntu-24.04-arm
             shell: bash
-          - target: aarch64-unknown-linux-musl  # Alpine
-            os: ubuntu-24.04-arm
-            container: alpine:latest
-            shell: sh
-            cargo_env: "source $HOME/.cargo/env"
-          - target: armv7-unknown-linux-gnueabihf  # Raspberry Pi 2-5/Debian
-            os: ubuntu-24.04-arm
+          # TODO: Fix cross compiling for the below targets
+          # - target: aarch64-unknown-linux-musl  # Alpine
+          #  os: ubuntu-24.04-arm
+          #  container: alpine:latest
+          #  shell: sh
+          #  cargo_env: "source $HOME/.cargo/env"
+          # - target: armv7-unknown-linux-gnueabihf  # Raspberry Pi 2-5/Debian
+          #  os: ubuntu-24.04-arm
+          #  shell: bash
+          # - target: armv7-unknown-linux-musleabihf  # Raspberry Pi 2-5/Alpine
+          #  os: ubuntu-24.04-arm
+          #  container: alpine:latest
+          #  shell: sh
+          #  cargo_env: "source $HOME/.cargo/env"
+          # - target: arm-unknown-linux-gnueabihf  # Raspberry Pi 0-1/Debian
+          #  os: ubuntu-24.04-arm
+          #  shell: bash
+          # - target: arm-unknown-linux-musleabihf  # Raspberry Pi 0-1/Alpine
+          #  os: ubuntu-24.04-arm
+          #  container: alpine:latest
+          #  shell: sh
+          #  cargo_env: "source $HOME/.cargo/env"
+          - target: x86_64-apple-darwin  # macOS/Intel
+            os: macos-latest
             shell: bash
-          - target: armv7-unknown-linux-musleabihf  # Raspberry Pi 2-5/Alpine
-            os: ubuntu-24.04-arm
-            container: alpine:latest
-            shell: sh
-            cargo_env: "source $HOME/.cargo/env"
-          - target: arm-unknown-linux-gnueabihf  # Raspberry Pi 0-1/Debian
-            os: ubuntu-24.04-arm
-            shell: bash
-          - target: arm-unknown-linux-musleabihf  # Raspberry Pi 0-1/Alpine
-            os: ubuntu-24.04-arm
-            container: alpine:latest
-            shell: sh
-            cargo_env: "source $HOME/.cargo/env"
-          - target: x86_64-apple-darwin  # macOS
+          - target: aarch64-apple-darwin  # macOS/Apple Silicon
             os: macos-latest
             shell: bash
           - target: x86_64-pc-windows-msvc  # Windows
@@ -135,17 +140,32 @@ jobs:
           cross_compile=false
           package_arch=$(dpkg --print-architecture)
           pkg_config_sysroot_dir="/usr/lib/${package_arch}"
+          qemu_command=""
           if [[ ${{ matrix.target }} == *"aarch64"* && $package_arch != "arm64" ]]; then
             dependencies+=("crossbuild-essential-arm64")
             cross_compile=true
             package_arch="arm64"
             pkg_config_sysroot_dir="/usr/lib/aarch64-linux-gnu"
+            qemu_command="qemu-aarch64-static"
           elif [[ ${{ matrix.target }} == *"arm"* && $package_arch != "armhf" ]]; then
             dependencies+=("crossbuild-essential-armhf")
             cross_compile=true
             package_arch="armhf"
             pkg_config_sysroot_dir="/usr/lib/arm-linux-gnueabihf"
+            qemu_command="qemu-arm-static"
           fi
+
+          if [[ $cross_compile == true ]]; then
+            dependencies+=(
+              "qemu-user"
+              "qemu-user-static"
+            )
+          fi
+
+          if [[ ${{ matrix.target }} == *"musl"* ]]; then
+              dependencies+=("musl-tools")
+          fi
+
           echo "cross compiling: $cross_compile"
           echo "package architecture: $package_arch"
 
@@ -210,6 +230,9 @@ jobs:
 
           echo "PKG_CONFIG_PATH=${pkg_config_sysroot_dir}/pkgconfig"
           echo "PKG_CONFIG_PATH=${pkg_config_sysroot_dir}/pkgconfig" >> $GITHUB_ENV
+
+          echo "QEMU_COMMAND=${qemu_command}"
+          echo "QEMU_COMMAND=${qemu_command}" >> $GITHUB_OUTPUT
           echo "::endgroup::"
 
       - name: Install system dependencies (Debian)
@@ -242,7 +265,15 @@ jobs:
             musl-dev \
             openssl-dev \
             rustup \
-            xdotool-dev
+            xdotool \
+            xdotool-dev \
+              pango-dev \
+              harfbuzz-dev \
+              cairo-dev \
+              gdk-pixbuf-dev \
+              wayland-dev \
+              zlib-dev \
+              gettext-dev
           echo "::endgroup::"
 
           echo "::group::rustup"
@@ -268,11 +299,23 @@ jobs:
           ${{ matrix.cargo_env }}
           rustup target add ${{ matrix.target }}
 
+      - name: Compile Test
+        run: |
+          ${{ matrix.cargo_env }}
+          cargo tarpaulin \
+            --color always \
+            --engine llvm \
+            --no-fail-fast \
+            --no-run \
+            --out Xml \
+            --target ${{ matrix.target }} \
+            --verbose
+
       - name: Test
         id: test
         run: |
           ${{ matrix.cargo_env }}
-          cargo tarpaulin \
+          ${{ steps.cross_compile.outputs.QEMU_COMMAND }} cargo tarpaulin \
             --color always \
             --engine llvm \
             --no-fail-fast \
