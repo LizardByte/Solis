@@ -308,6 +308,7 @@ jobs:
             --no-fail-fast \
             --no-run \
             --out Xml \
+            --skip-clean \
             --target ${{ matrix.target }} \
             --verbose
 
@@ -320,6 +321,7 @@ jobs:
             --engine llvm \
             --no-fail-fast \
             --out Xml \
+            --skip-clean \
             --target ${{ matrix.target }} \
             --verbose
 
@@ -358,11 +360,25 @@ jobs:
         continue-on-error: true
         run: chmod -R a+rwX $HOME/.cargo target
 
+      - name: Create 7z archive
+        run: |
+          mkdir -p artifacts
+
+          extension=""
+          if [[ ${{ matrix.target }} == *"windows"* ]]; then
+            extension=".exe"
+          fi
+
+          7z a "./artifacts/koko-${{ matrix.target }}.7z" \
+            "./assets" \
+            "./target/${{ matrix.target }}/release/koko${extension}"
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
+          if-no-files-found: 'error'
           name: koko-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/koko
+          path: artifacts
 
       - name: Create/Update GitHub Release
         if: false
@@ -370,7 +386,6 @@ jobs:
         uses: LizardByte/create-release-action@v2025.102.13208
         with:
           allowUpdates: true
-          artifacts: 'target/${{ matrix.target }}/release/koko'
           body: ${{ needs.setup_release.outputs.release_body }}
           generateReleaseNotes: ${{ needs.setup_release.outputs.release_generate_release_notes }}
           name: ${{ needs.setup_release.outputs.release_tag }}
