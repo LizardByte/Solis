@@ -19,7 +19,8 @@ enum UserEvent {
     MenuEvent(MenuEvent),
 }
 
-pub(crate) fn launch() {
+/// Launch the tray icon and event loop.
+pub fn launch() {
     let path = std::path::Path::new(GLOBAL_ICON_ICO_PATH);
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
@@ -179,7 +180,8 @@ pub(crate) fn launch() {
     })
 }
 
-fn load_icon(path: &std::path::Path) -> tray_icon::Icon {
+/// Load an icon from a file path.
+pub fn load_icon(path: &std::path::Path) -> tray_icon::Icon {
     let (icon_rgba, icon_width, icon_height) = {
         let image = image::open(path)
             .expect("Failed to open icon path")

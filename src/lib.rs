@@ -5,7 +5,7 @@
 
 // modules
 mod logging;
-mod tray;
+pub mod tray;
 pub mod web;
 
 // standard imports

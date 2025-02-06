@@ -265,7 +265,6 @@ jobs:
             musl-dev \
             openssl-dev \
             rustup \
-            xdotool \
             xdotool-dev \
               pango-dev \
               harfbuzz-dev \
