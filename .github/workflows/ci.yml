@@ -298,29 +298,15 @@ jobs:
           ${{ matrix.cargo_env }}
           rustup target add ${{ matrix.target }}
 
-      - name: Compile Test
+      - name: Test
+        id: test
         run: |
           ${{ matrix.cargo_env }}
           cargo tarpaulin \
             --color always \
             --engine llvm \
             --no-fail-fast \
-            --no-run \
             --out Xml \
-            --skip-clean \
-            --target ${{ matrix.target }} \
-            --verbose
-
-      - name: Test
-        id: test
-        run: |
-          ${{ matrix.cargo_env }}
-          ${{ steps.cross_compile.outputs.QEMU_COMMAND }} cargo tarpaulin \
-            --color always \
-            --engine llvm \
-            --no-fail-fast \
-            --out Xml \
-            --skip-clean \
             --target ${{ matrix.target }} \
             --verbose
 

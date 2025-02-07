@@ -85,7 +85,7 @@ This list is not all-inclusive, and just meant to be a very high level for the i
   - [ ] API
   - [ ] Media Scanner
   - [ ] Media Player
-  - [ ] Legal/Licensing info on dependencies
+  - [x] Legal/Licensing info on dependencies
 - [ ] Frontend
   - [ ] Home
   - [ ] Media
