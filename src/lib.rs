@@ -4,6 +4,7 @@
 #![deny(missing_docs)]
 
 // modules
+pub mod dependencies;
 mod logging;
 pub mod tray;
 pub mod web;

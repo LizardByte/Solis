@@ -1,7 +1,7 @@
 [package]
 name = "koko"
 description = "Self-hosted media server."
-license = "AGPL-3"
+license = "AGPL-3.0-only"
 version = "0.0.0"
 authors = ["LizardByte"]
 edition = "2021"
@@ -41,6 +41,7 @@ path = "src/main.rs"
 
 [dependencies]
 # ensure deps are compatible: https://www.gnu.org/licenses/license-list.en.html#GPLCompatibleLicenses
+cargo_metadata = "0.19.1"
 chrono = "0.4.39"
 fern = { version = "0.7.1", features = ["colored"] }
 image = "0.25.5"
@@ -48,6 +49,8 @@ log = "0.4.25"
 regex = "1.11.1"
 rocket = "0.5.1"
 rocket_okapi = { version = "0.9.0", features = ["swagger", "rapidoc"] }
+schemars = "0.8.1"
+serde = "1.0.217"
 tao = "0.31.1"
 tray-icon = "0.19.2"
 webbrowser = "1.0.3"

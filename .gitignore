@@ -22,3 +22,7 @@ Cargo.lock
 
 # cargo-run-bin
 .bin/
+
+# coverage results
+cobertura.xml
+tarpaulin-report.json
